@@ -27,6 +27,25 @@ MAX_WAIT = 900
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _load_api_key(api_key_input):
+    """Return api_key_input if set, otherwise fall back to ~/.muapi/config.json."""
+    if api_key_input and api_key_input.strip():
+        return api_key_input.strip()
+    config_path = os.path.expanduser("~/.muapi/config.json")
+    if os.path.isfile(config_path):
+        try:
+            import json as _json
+            with open(config_path) as f:
+                key = _json.load(f).get("api_key", "")
+            if key:
+                return key
+        except Exception:
+            pass
+    raise RuntimeError(
+        "No API key found. Either paste your key into the api_key field, "
+        "or run `muapi auth configure --api-key YOUR_KEY` in a terminal."
+    )
+
 def _upload_image(api_key, image_tensor):
     if image_tensor.dim() == 4:
         image_tensor = image_tensor[0]
@@ -115,20 +134,21 @@ class Seedance2TextToVideo:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "api_key": ("STRING", {"multiline": False, "default": ""}),
             "prompt": ("STRING", {"multiline": True,
                 "default": "A cinematic aerial shot of a futuristic city at dusk, volumetric lighting, 4K"}),
             "aspect_ratio": (["16:9", "9:16", "4:3", "3:4"], {"default": "16:9"}),
             "quality": (["basic", "high"], {"default": "basic"}),
             "duration": ([5, 10, 15], {"default": 5}),
+        }, "optional": {
+            "api_key": ("STRING", {"multiline": False, "default": ""}),
         }}
     RETURN_TYPES = ("STRING", "IMAGE", "STRING")
     RETURN_NAMES = ("video_url", "first_frame", "request_id")
     FUNCTION = "run"
     CATEGORY = "🌱 Seedance 2.0"
 
-    def run(self, api_key, prompt, aspect_ratio, quality, duration):
-        if not api_key.strip(): raise ValueError("api_key required. Get yours at muapi.ai")
+    def run(self, prompt, aspect_ratio, quality, duration, api_key=""):
+        api_key = _load_api_key(api_key)
         payload = {"prompt": prompt, "aspect_ratio": aspect_ratio,
                    "quality": quality, "duration": duration}
         print("[Seedance2 T2V] Submitting...")
@@ -151,13 +171,13 @@ class Seedance2ImageToVideo:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "api_key": ("STRING", {"multiline": False, "default": ""}),
             "prompt": ("STRING", {"multiline": True,
                 "default": "The character in @image1 walks through a beautiful garden, cinematic motion"}),
             "aspect_ratio": (["16:9", "9:16", "4:3", "3:4"], {"default": "16:9"}),
             "quality": (["basic", "high"], {"default": "basic"}),
             "duration": ([5, 10, 15], {"default": 5}),
         }, "optional": {
+            "api_key": ("STRING", {"multiline": False, "default": ""}),
             "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
             "image_4": ("IMAGE",), "image_5": ("IMAGE",), "image_6": ("IMAGE",),
             "image_7": ("IMAGE",), "image_8": ("IMAGE",), "image_9": ("IMAGE",),
@@ -167,10 +187,10 @@ class Seedance2ImageToVideo:
     FUNCTION = "run"
     CATEGORY = "🌱 Seedance 2.0"
 
-    def run(self, api_key, prompt, aspect_ratio, quality, duration,
+    def run(self, prompt, aspect_ratio, quality, duration, api_key="",
             image_1=None, image_2=None, image_3=None, image_4=None, image_5=None,
             image_6=None, image_7=None, image_8=None, image_9=None):
-        if not api_key.strip(): raise ValueError("api_key required.")
+        api_key = _load_api_key(api_key)
         tensors = [image_1, image_2, image_3, image_4, image_5,
                    image_6, image_7, image_8, image_9]
         images_list = []
@@ -201,12 +221,12 @@ class Seedance2Extend:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "api_key": ("STRING", {"multiline": False, "default": ""}),
             "request_id": ("STRING", {"multiline": False, "default": "",
                 "tooltip": "request_id from a completed Seedance 2.0 generation"}),
             "quality": (["basic", "high"], {"default": "basic"}),
             "duration": ([5, 10, 15], {"default": 5}),
         }, "optional": {
+            "api_key": ("STRING", {"multiline": False, "default": ""}),
             "prompt": ("STRING", {"multiline": True, "default": "",
                 "tooltip": "Optional continuation prompt"}),
         }}
@@ -215,8 +235,8 @@ class Seedance2Extend:
     FUNCTION = "run"
     CATEGORY = "🌱 Seedance 2.0"
 
-    def run(self, api_key, request_id, quality, duration, prompt=""):
-        if not api_key.strip(): raise ValueError("api_key required.")
+    def run(self, request_id, quality, duration, api_key="", prompt=""):
+        api_key = _load_api_key(api_key)
         if not request_id.strip(): raise ValueError("request_id required.")
         payload = {"request_id": request_id.strip(), "quality": quality, "duration": duration}
         if prompt.strip(): payload["prompt"] = prompt.strip()
@@ -228,13 +248,36 @@ class Seedance2Extend:
         return (url, _first_frame(url), new_id)
 
 
+class Seedance2ApiKey:
+    """
+    Store your MuAPI API key once and wire it to any Seedance 2.0 node.
+    Leave all node api_key fields empty — they auto-read from this node
+    or from ~/.muapi/config.json (set via `muapi auth configure`).
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "api_key": ("STRING", {"multiline": False, "default": "",
+                "tooltip": "Your muapi.ai API key. Get one at muapi.ai → Dashboard → API Keys"}),
+        }}
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("api_key",)
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, api_key):
+        return (_load_api_key(api_key),)
+
+
 NODE_CLASS_MAPPINGS = {
+    "Seedance2ApiKey":       Seedance2ApiKey,
     "Seedance2TextToVideo":  Seedance2TextToVideo,
     "Seedance2ImageToVideo": Seedance2ImageToVideo,
     "Seedance2Extend":       Seedance2Extend,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "Seedance2ApiKey":       "🔑 Seedance 2.0 API Key",
     "Seedance2TextToVideo":  "🌱 Seedance 2.0 Text-to-Video",
     "Seedance2ImageToVideo": "🌱 Seedance 2.0 Image-to-Video",
     "Seedance2Extend":       "🌱 Seedance 2.0 Extend",
