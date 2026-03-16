@@ -132,6 +132,14 @@ Authentication is a single `x-api-key` header — no session tokens required.
 
 ---
 
+## Want More Models?
+
+This repo is focused on Seedance 2.0 only. If you need access to **100+ models** — Kling, Veo3, Flux, HiDream, GPT-image-1.5, Imagen4, Wan, lipsync, audio, image enhancement and more — check out the full MuAPI ComfyUI node pack:
+
+**[SamurAIGPT/muapi-comfyui](https://github.com/SamurAIGPT/muapi-comfyui)** — ComfyUI nodes for every muapi.ai model in one place.
+
+---
+
 ## License
 
 MIT © 2026
