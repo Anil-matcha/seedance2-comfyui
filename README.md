@@ -23,6 +23,7 @@ Seedance 2.0 is ByteDance's latest video generation model, capable of producing 
 
 | Node | Description |
 |------|-------------|
+| 🔑 Seedance 2.0 API Key | Set your key once — wire to all nodes |
 | 🌱 Seedance 2.0 Text-to-Video | Generate video from a text prompt |
 | 🌱 Seedance 2.0 Image-to-Video | Animate up to 9 reference images |
 | 🌱 Seedance 2.0 Extend | Extend a previously generated video |
@@ -34,13 +35,13 @@ Seedance 2.0 is ByteDance's latest video generation model, capable of producing 
 
 ### Via ComfyUI Manager (recommended)
 1. Open **ComfyUI Manager** → **Install via Git URL**
-2. Paste: `https://github.com/Anil-matcha/langchain-tutorials`
+2. Paste: `https://github.com/Anil-matcha/seedance2-comfyui`
 3. Restart ComfyUI
 
 ### Manual
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/Anil-matcha/langchain-tutorials seedance2-comfyui
+git clone https://github.com/Anil-matcha/seedance2-comfyui
 pip install -r seedance2-comfyui/requirements.txt
 ```
 
@@ -50,12 +51,20 @@ pip install -r seedance2-comfyui/requirements.txt
 
 1. Sign up at [muapi.ai](https://muapi.ai) and go to **Dashboard → API Keys → Create Key**
 2. Right-click the ComfyUI canvas → **Add Node** → **🌱 Seedance 2.0**
-3. Paste your API key into the `api_key` field
+3. Add a **🔑 Seedance 2.0 API Key** node, paste your key, and wire its output to any generation node
 4. Write a prompt and hit **Queue Prompt**
+
+> **Tip:** If you use the [MuAPI CLI](https://github.com/SamurAIGPT/muapi-cli), run `muapi auth configure --api-key YOUR_KEY` once and all nodes will pick it up automatically — no need to paste the key anywhere.
 
 ---
 
 ## Node Reference
+
+### 🔑 Seedance 2.0 API Key
+
+Set your muapi.ai API key once and wire the output to all generation nodes. Alternatively, leave every `api_key` field blank — nodes automatically read from `~/.muapi/config.json` if you've authenticated via the CLI.
+
+---
 
 ### 🌱 Seedance 2.0 Text-to-Video
 
@@ -63,7 +72,7 @@ Generate a video from a text description.
 
 | Field | Values | Default |
 |-------|--------|---------|
-| `api_key` | Your muapi.ai API key | — |
+| `api_key` | Optional — leave blank if using the API Key node or CLI config | — |
 | `prompt` | Text describing the video | — |
 | `aspect_ratio` | 16:9 / 9:16 / 4:3 / 3:4 | 16:9 |
 | `quality` | basic / high | basic |
@@ -109,7 +118,9 @@ Downloads the generated video to ComfyUI's output folder and returns all frames 
 Load `Seedance2_T2V_Example.json` from this repo via **File → Load** in ComfyUI.
 
 ```
-[MuAPI Text-to-Video] → [MuAPI Save Video] → [Preview Image]
+[🔑 API Key] ──────────────────────────────────┐
+                                                ↓
+[🌱 Text-to-Video] → video_url → [🌱 Save Video] → frames → [Preview Image]
 ```
 
 ---
