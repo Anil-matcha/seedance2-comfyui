@@ -2,6 +2,7 @@
 
 > **ComfyUI custom nodes for Seedance 2.0** — the state-of-the-art video generation model by ByteDance.
 > Generate stunning AI videos directly inside ComfyUI using the [muapi.ai](https://muapi.ai) API.
+> If you wish to check the api documentation check this [Seedance 2.0 api](https://github.com/Anil-matcha/Seedance-2.0-API)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom%20Node-blue)](https://github.com/comfyanonymous/ComfyUI)
