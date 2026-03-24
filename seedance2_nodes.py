@@ -6,6 +6,7 @@ Focused nodes for Seedance 2.0 video generation via muapi.ai.
   Seedance2TextToVideo  — POST /api/v1/seedance-v2.0-t2v
   Seedance2ImageToVideo — POST /api/v1/seedance-v2.0-i2v
   Seedance2Extend       — POST /api/v1/seedance-v2.0-extend
+  Seedance2Omni         — POST /api/v1/seedance-2.0-omni-reference
 
 Auth:     x-api-key header
 Polling:  GET /api/v1/predictions/{request_id}/result
@@ -269,11 +270,96 @@ class Seedance2ApiKey:
         return (_load_api_key(api_key),)
 
 
+class Seedance2Omni:
+    """
+    Seedance 2.0 Omni Reference
+    ----------------------------
+    Multi-modal generation: combine images, video clips, and audio clips
+    as reference material alongside a text prompt.
+
+    Reference media in the prompt using:
+      @image1 … @image9   — uploaded image tensors
+      @video1 … @video3   — video clip URLs
+      @audio1 … @audio3   — audio clip URLs
+
+    Example:
+      "A person @image1 walking on the beach at sunset, cinematic lighting"
+
+    Aspect ratios: 21:9 | 16:9 | 4:3 | 1:1 | 3:4 | 9:16
+    Duration: 4 – 15 seconds
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "prompt": ("STRING", {"multiline": True,
+                "default": "A person @image1 walking on the beach at sunset, cinematic lighting"}),
+            "aspect_ratio": (["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], {"default": "16:9"}),
+            "duration": ("INT", {"default": 5, "min": 4, "max": 15, "step": 1}),
+        }, "optional": {
+            "api_key":    ("STRING", {"multiline": False, "default": ""}),
+            # Reference images (uploaded from ComfyUI tensors)
+            "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
+            "image_4": ("IMAGE",), "image_5": ("IMAGE",), "image_6": ("IMAGE",),
+            "image_7": ("IMAGE",), "image_8": ("IMAGE",), "image_9": ("IMAGE",),
+            # Reference video URLs (@video1 … @video3)
+            "video_url_1": ("STRING", {"multiline": False, "default": ""}),
+            "video_url_2": ("STRING", {"multiline": False, "default": ""}),
+            "video_url_3": ("STRING", {"multiline": False, "default": ""}),
+            # Reference audio URLs (@audio1 … @audio3)
+            "audio_url_1": ("STRING", {"multiline": False, "default": ""}),
+            "audio_url_2": ("STRING", {"multiline": False, "default": ""}),
+            "audio_url_3": ("STRING", {"multiline": False, "default": ""}),
+        }}
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("video_url", "first_frame", "request_id")
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, prompt, aspect_ratio, duration, api_key="",
+            image_1=None, image_2=None, image_3=None, image_4=None, image_5=None,
+            image_6=None, image_7=None, image_8=None, image_9=None,
+            video_url_1="", video_url_2="", video_url_3="",
+            audio_url_1="", audio_url_2="", audio_url_3=""):
+        api_key = _load_api_key(api_key)
+
+        # Upload image tensors
+        image_tensors = [image_1, image_2, image_3, image_4, image_5,
+                         image_6, image_7, image_8, image_9]
+        images_list = []
+        for i, img in enumerate(image_tensors, 1):
+            if img is not None:
+                print(f"[Seedance2 Omni] Uploading image {i}...")
+                images_list.append(_upload_image(api_key, img))
+
+        # Collect video URLs
+        video_files = [u.strip() for u in [video_url_1, video_url_2, video_url_3] if u and u.strip()]
+
+        # Collect audio URLs
+        audio_files = [u.strip() for u in [audio_url_1, audio_url_2, audio_url_3] if u and u.strip()]
+
+        payload = {"prompt": prompt, "aspect_ratio": aspect_ratio, "duration": duration}
+        if images_list:
+            payload["images_list"] = images_list
+        if video_files:
+            payload["video_files"] = video_files
+        if audio_files:
+            payload["audio_files"] = audio_files
+
+        print(f"[Seedance2 Omni] Submitting "
+              f"({len(images_list)} image(s), {len(video_files)} video(s), {len(audio_files)} audio(s))...")
+        rid = _submit(api_key, "seedance-2.0-omni-reference", payload)
+        result = _poll(api_key, rid)
+        url = _output_url(result)
+        print(f"[Seedance2 Omni] Done → {url}")
+        return (url, _first_frame(url), rid)
+
+
 NODE_CLASS_MAPPINGS = {
     "Seedance2ApiKey":       Seedance2ApiKey,
     "Seedance2TextToVideo":  Seedance2TextToVideo,
     "Seedance2ImageToVideo": Seedance2ImageToVideo,
     "Seedance2Extend":       Seedance2Extend,
+    "Seedance2Omni":         Seedance2Omni,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -281,4 +367,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Seedance2TextToVideo":  "🌱 Seedance 2.0 Text-to-Video",
     "Seedance2ImageToVideo": "🌱 Seedance 2.0 Image-to-Video",
     "Seedance2Extend":       "🌱 Seedance 2.0 Extend",
+    "Seedance2Omni":         "🌱 Seedance 2.0 Omni Reference",
 }
