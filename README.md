@@ -15,6 +15,7 @@ Seedance 2.0 is ByteDance's latest video generation model, capable of producing 
 
 - **Text-to-Video** — generate video from a text description
 - **Image-to-Video** — animate up to 9 reference images with motion guidance
+- **Omni Reference** — combine images, video clips, and audio as multi-modal reference inputs
 - **Video Extend** — seamlessly extend any generated video
 
 ---
@@ -26,6 +27,7 @@ Seedance 2.0 is ByteDance's latest video generation model, capable of producing 
 | 🔑 Seedance 2.0 API Key | Set your key once — wire to all nodes |
 | 🌱 Seedance 2.0 Text-to-Video | Generate video from a text prompt |
 | 🌱 Seedance 2.0 Image-to-Video | Animate up to 9 reference images |
+| 🌱 Seedance 2.0 Omni Reference | Multi-modal: combine images, video clips, and audio |
 | 🌱 Seedance 2.0 Extend | Extend a previously generated video |
 | 🌱 Seedance 2.0 Save Video | Download URL → disk + ComfyUI IMAGE frames |
 
@@ -94,6 +96,28 @@ The cat in @image1 walks gracefully through a sunlit garden.
 
 ---
 
+### 🌱 Seedance 2.0 Omni Reference
+
+Multi-modal video generation that combines images, video clips, and audio clips as reference material alongside a text prompt. Use `@image1`…`@image9`, `@video1`…`@video3`, and `@audio1`…`@audio3` to reference media in the prompt.
+
+**Example prompt:**
+```
+A person @image1 walking on the beach at sunset, cinematic lighting, with @audio1 as background music.
+```
+
+| Field | Values | Default |
+|-------|--------|---------|
+| `prompt` | Text with optional `@imageN`, `@videoN`, `@audioN` references | — |
+| `aspect_ratio` | 21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16 | 16:9 |
+| `duration` | 4 – 15 seconds (integer) | 5 |
+| `image_1` … `image_9` | Optional — ComfyUI IMAGE tensors (auto-uploaded) | — |
+| `video_url_1` … `video_url_3` | Optional — MP4 URL (max 15s each) | — |
+| `audio_url_1` … `audio_url_3` | Optional — MP3/WAV URL (total max 15s) | — |
+
+**Outputs:** `video_url` · `first_frame` (IMAGE) · `request_id`
+
+---
+
 ### 🌱 Seedance 2.0 Extend
 
 Continue any completed Seedance 2.0 video. Connect the `request_id` output from a generation node.
@@ -128,7 +152,10 @@ Load `Seedance2_T2V_Example.json` from this repo via **File → Load** in ComfyU
 ## API
 
 This node pack uses the **muapi.ai** API under the hood:
-- **Submit:** `POST https://api.muapi.ai/api/v1/seedance-v2.0-t2v`
+- **T2V:** `POST https://api.muapi.ai/api/v1/seedance-v2.0-t2v`
+- **I2V:** `POST https://api.muapi.ai/api/v1/seedance-v2.0-i2v`
+- **Omni:** `POST https://api.muapi.ai/api/v1/seedance-2.0-omni-reference`
+- **Extend:** `POST https://api.muapi.ai/api/v1/seedance-v2.0-extend`
 - **Poll:** `GET https://api.muapi.ai/api/v1/predictions/{id}/result`
 - **Upload:** `POST https://api.muapi.ai/api/v1/upload_file`
 
