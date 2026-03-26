@@ -1,6 +1,6 @@
 # n8n-nodes-seedance2: ByteDance Seedance 2.0 AI Video Generation Node for n8n
 
-Integrate **ByteDance Seedance 2.0** into your **n8n** workflows for high-quality **AI video generation**. This community node allows you to automate **Text-to-Video**, **Image-to-Video**, and **Video Extension** directly within your no-code automation pipeline.
+Integrate **ByteDance Seedance 2.0** into your **n8n** workflows for high-quality **AI video generation**. This community node allows you to automate **Text-to-Video**, **Image-to-Video**, and **Video Extension** directly within your no-code automation pipeline. If you are just looking for Seedance 2.0 api check this [Seedance 2.0 api](https://github.com/Anil-matcha/Seedance-2.0-API)
 
 ![Seedance 2.0 n8n Node](https://muapi.ai/muapi-logo.svg)
 
