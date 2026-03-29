@@ -18,6 +18,7 @@ Seedance 2.0 is ByteDance's latest video generation model, capable of producing 
 - **Image-to-Video** — animate up to 9 reference images with motion guidance
 - **Omni Reference** — combine images, video clips, and audio as multi-modal reference inputs
 - **Video Extend** — seamlessly extend any generated video
+- **Character** — create a reusable fictional character sheet; reference it in any prompt with `@character:<id>`
 
 ---
 
@@ -29,6 +30,7 @@ Seedance 2.0 is ByteDance's latest video generation model, capable of producing 
 | 🌱 Seedance 2.0 Text-to-Video | Generate video from a text prompt |
 | 🌱 Seedance 2.0 Image-to-Video | Animate up to 9 reference images |
 | 🌱 Seedance 2.0 Omni Reference | Multi-modal: combine images, video clips, and audio |
+| 🌱 Seedance 2.0 Character | Create a reusable character sheet from reference photos |
 | 🌱 Seedance 2.0 Extend | Extend a previously generated video |
 | 🌱 Seedance 2.0 Save Video | Download URL → disk + ComfyUI IMAGE frames |
 
@@ -119,6 +121,27 @@ A person @image1 walking on the beach at sunset, cinematic lighting, with @audio
 
 ---
 
+### 🌱 Seedance 2.0 Character
+
+Create a reusable fictional character sheet from 1–5 reference photos. The node uploads the photos, submits the job, waits for the sheet to render, and returns a `character_id`. Wire that string into the `prompt` of any T2V, I2V, or Omni node using `@character:<character_id>`.
+
+| Field | Description |
+|-------|-------------|
+| `image_1` … `image_5` | Reference photos of the person (at least 1 required) |
+| `outfit_description` | Describe the desired outfit/style for the fictional character |
+| `character_name` | Optional display name |
+
+**Output:** `character_id` (STRING) — use as `@character:<character_id>` in any prompt.
+
+**Example workflow:**
+```
+[🌱 Character] character_id ──→ (paste into prompt) ──→ [🌱 Text-to-Video]
+
+T2V prompt: "@character:{character_id} rides a motorcycle through a neon-lit city at night"
+```
+
+---
+
 ### 🌱 Seedance 2.0 Extend
 
 Continue any completed Seedance 2.0 video. Connect the `request_id` output from a generation node.
@@ -156,6 +179,7 @@ This node pack uses the **muapi.ai** API under the hood:
 - **T2V:** `POST https://api.muapi.ai/api/v1/seedance-v2.0-t2v`
 - **I2V:** `POST https://api.muapi.ai/api/v1/seedance-v2.0-i2v`
 - **Omni:** `POST https://api.muapi.ai/api/v1/seedance-2.0-omni-reference`
+- **Character:** `POST https://api.muapi.ai/api/v1/seedance-2-character`
 - **Extend:** `POST https://api.muapi.ai/api/v1/seedance-v2.0-extend`
 - **Poll:** `GET https://api.muapi.ai/api/v1/predictions/{id}/result`
 - **Upload:** `POST https://api.muapi.ai/api/v1/upload_file`

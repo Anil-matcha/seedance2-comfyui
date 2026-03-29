@@ -7,6 +7,7 @@ Focused nodes for Seedance 2.0 video generation via muapi.ai.
   Seedance2ImageToVideo — POST /api/v1/seedance-v2.0-i2v
   Seedance2Extend       — POST /api/v1/seedance-v2.0-extend
   Seedance2Omni         — POST /api/v1/seedance-2.0-omni-reference
+  Seedance2Character    — POST /api/v1/seedance-2-character
 
 Auth:     x-api-key header
 Polling:  GET /api/v1/predictions/{request_id}/result
@@ -354,12 +355,79 @@ class Seedance2Omni:
         return (url, _first_frame(url), rid)
 
 
+class Seedance2Character:
+    """
+    Seedance 2.0 Character
+    -----------------------
+    Create a reusable fictional character sheet from 1–5 reference photos of a real person.
+
+    Once completed the node outputs the request_id. Wire that into a
+    Seedance2TextToVideo or Seedance2ImageToVideo prompt as:
+        @character:<request_id>
+
+    Example T2V prompt:
+        "@character:ab539e5f-... rides a motorcycle through a neon-lit city at night"
+
+    The server resolves the character sheet URL automatically and injects the
+    image into the generation request.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "outfit_description": ("STRING", {"multiline": True,
+                "default": "cyberpunk jacket with neon accents, glowing visor",
+                "tooltip": "Describe the desired outfit/style for the fictional character"}),
+        }, "optional": {
+            "api_key":        ("STRING", {"multiline": False, "default": ""}),
+            "character_name": ("STRING", {"multiline": False, "default": "",
+                "tooltip": "Optional display name for the character"}),
+            # Up to 5 reference photos of the person
+            "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
+            "image_4": ("IMAGE",), "image_5": ("IMAGE",),
+        }}
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("character_id",)
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, outfit_description, api_key="", character_name="",
+            image_1=None, image_2=None, image_3=None, image_4=None, image_5=None):
+        api_key = _load_api_key(api_key)
+        tensors = [image_1, image_2, image_3, image_4, image_5]
+        images_list = []
+        for i, img in enumerate(tensors, 1):
+            if img is not None:
+                print(f"[Seedance2 Character] Uploading reference image {i}...")
+                images_list.append(_upload_image(api_key, img))
+        if not images_list:
+            raise ValueError("At least one reference image is required to create a character.")
+
+        payload: dict = {
+            "images_list": images_list,
+            "outfit_description": outfit_description.strip(),
+        }
+        if character_name.strip():
+            payload["character_name"] = character_name.strip()
+
+        print(f"[Seedance2 Character] Creating character sheet from {len(images_list)} image(s)...")
+        rid = _submit(api_key, "seedance-2-character", payload)
+
+        # Poll until the character sheet is ready
+        result = _poll(api_key, rid)
+        sheet_url = (result.get("output_data") or result).get("sheet_url") or ""
+        if sheet_url:
+            print(f"[Seedance2 Character] Sheet ready → {sheet_url}")
+        print(f"[Seedance2 Character] Use in prompt: @character:{rid}")
+        return (rid,)
+
+
 NODE_CLASS_MAPPINGS = {
     "Seedance2ApiKey":       Seedance2ApiKey,
     "Seedance2TextToVideo":  Seedance2TextToVideo,
     "Seedance2ImageToVideo": Seedance2ImageToVideo,
     "Seedance2Extend":       Seedance2Extend,
     "Seedance2Omni":         Seedance2Omni,
+    "Seedance2Character":    Seedance2Character,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -368,4 +436,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Seedance2ImageToVideo": "🌱 Seedance 2.0 Image-to-Video",
     "Seedance2Extend":       "🌱 Seedance 2.0 Extend",
     "Seedance2Omni":         "🌱 Seedance 2.0 Omni Reference",
+    "Seedance2Character":    "🌱 Seedance 2.0 Character",
 }
