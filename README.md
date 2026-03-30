@@ -18,7 +18,7 @@ Seedance 2.0 is ByteDance's latest video generation model, capable of producing 
 - **Image-to-Video** — animate up to 9 reference images with motion guidance
 - **Omni Reference** — combine images, video clips, and audio as multi-modal reference inputs
 - **Video Extend** — seamlessly extend any generated video
-- **Character** — create a reusable fictional character sheet; reference it in any prompt with `@character:<id>`
+- **Consistent Character** — generate a 4K multi-panel character sheet from reference photos; use `@character:<id>` inline in any prompt, or wire the sheet image directly into **Consistent Character Video** for tighter face fidelity
 
 ---
 
@@ -30,7 +30,8 @@ Seedance 2.0 is ByteDance's latest video generation model, capable of producing 
 | 🌱 Seedance 2.0 Text-to-Video | Generate video from a text prompt |
 | 🌱 Seedance 2.0 Image-to-Video | Animate up to 9 reference images |
 | 🌱 Seedance 2.0 Omni Reference | Multi-modal: combine images, video clips, and audio |
-| 🌱 Seedance 2.0 Character | Create a reusable character sheet from reference photos |
+| 🌱 Seedance 2.0 Consistent Character | Generate a 4K character sheet from 1–3 reference photos |
+| 🌱 Seedance 2.0 Consistent Character Video | Animate a scene with locked character identity from a sheet |
 | 🌱 Seedance 2.0 Extend | Extend a previously generated video |
 | 🌱 Seedance 2.0 Save Video | Download URL → disk + ComfyUI IMAGE frames |
 
@@ -121,23 +122,59 @@ A person @image1 walking on the beach at sunset, cinematic lighting, with @audio
 
 ---
 
-### 🌱 Seedance 2.0 Character
+### 🌱 Seedance 2.0 Consistent Character
 
-Create a reusable fictional character sheet from 1–5 reference photos. The node uploads the photos, submits the job, waits for the sheet to render, and returns a `character_id`. Wire that string into the `prompt` of any T2V, I2V, or Omni node using `@character:<character_id>`.
+Generate a 4K / 21:9 multi-panel character sheet (front, back, side profile, action pose, facial expressions, accessories) from 1–3 reference photos of a real person.
 
 | Field | Description |
 |-------|-------------|
-| `image_1` … `image_5` | Reference photos of the person (at least 1 required) |
-| `outfit_description` | Describe the desired outfit/style for the fictional character |
-| `character_name` | Optional display name |
+| `image_1` … `image_3` | Reference photos of the person (at least 1 required; clear frontal/3-4 angle shots work best) |
+| `outfit_description` | Describe the desired outfit/style for the character |
 
-**Output:** `character_id` (STRING) — use as `@character:<character_id>` in any prompt.
+**Outputs:**
 
-**Example workflow:**
+| Output | Type | Description |
+|--------|------|-------------|
+| `sheet_image` | IMAGE | Character sheet as a ComfyUI tensor — wire directly into Consistent Character Video |
+| `sheet_url` | STRING | CDN URL of the character sheet image |
+| `character_id` | STRING | `request_id` of this generation — use as `@character:<id>` in T2V/I2V/Omni prompts |
+
+**Recommended workflow — wire `sheet_image` into Consistent Character Video:**
 ```
-[🌱 Character] character_id ──→ (paste into prompt) ──→ [🌱 Text-to-Video]
+[LoadImage] ──→ [🌱 Consistent Character] ──(sheet_image)──→ [🌱 Consistent Character Video]
+                    [outfit_description]       (sheet_url)          [scene prompt]
+```
+
+**Alternative — use `@character:<id>` in any prompt (simpler but looser face fidelity):**
+```
+[🌱 Consistent Character] character_id ──→ (paste into prompt) ──→ [🌱 Text-to-Video]
 
 T2V prompt: "@character:{character_id} rides a motorcycle through a neon-lit city at night"
+```
+
+---
+
+### 🌱 Seedance 2.0 Consistent Character Video
+
+Generate a video scene with locked character identity. Anchors on the character sheet image as `@image1` for maximum face/identity preservation.
+
+Connect `sheet_image` (or paste `sheet_url`) from the **Consistent Character** node.
+
+| Field | Description |
+|-------|-------------|
+| `prompt` | Scene description. `@image1` refers to the character sheet and is auto-prepended if omitted. |
+| `sheet_image` | IMAGE tensor from Consistent Character (preferred) |
+| `sheet_url` | Paste the sheet URL if you don't have the tensor |
+| `scene_image_2`, `scene_image_3` | Optional extra scene/background images (referenced as `@image2`, `@image3`) |
+| `aspect_ratio` | 16:9 / 9:16 / 4:3 / 3:4 |
+| `quality` | basic / high |
+| `duration` | 5 / 10 / 15 seconds |
+
+**Outputs:** `video_url` · `first_frame` (IMAGE) · `request_id`
+
+**Example prompt:**
+```
+@image1 walks through a rain-soaked neon city, cinematic slow motion
 ```
 
 ---
@@ -161,14 +198,23 @@ Downloads the generated video to ComfyUI's output folder and returns all frames 
 
 ---
 
-## Example Workflow
+## Example Workflows
 
 Load `Seedance2_T2V_Example.json` from this repo via **File → Load** in ComfyUI.
 
+**Text-to-Video:**
 ```
 [🔑 API Key] ──────────────────────────────────┐
                                                 ↓
 [🌱 Text-to-Video] → video_url → [🌱 Save Video] → frames → [Preview Image]
+```
+
+**Consistent Character:**
+```
+[🔑 API Key] ─────────────────────────────────────────────────┐
+                                                               ↓
+[LoadImage] → [🌱 Consistent Character] → sheet_image → [🌱 Consistent Character Video] → [🌱 Save Video]
+               [outfit_description]        sheet_url         [scene prompt]
 ```
 
 ---

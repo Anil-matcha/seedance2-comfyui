@@ -3,11 +3,15 @@ MuAPI Seedance 2.0 ComfyUI Nodes
 ==================================
 Focused nodes for Seedance 2.0 video generation via muapi.ai.
 
-  Seedance2TextToVideo  — POST /api/v1/seedance-v2.0-t2v
-  Seedance2ImageToVideo — POST /api/v1/seedance-v2.0-i2v
-  Seedance2Extend       — POST /api/v1/seedance-v2.0-extend
-  Seedance2Omni         — POST /api/v1/seedance-2.0-omni-reference
-  Seedance2Character    — POST /api/v1/seedance-2-character
+  Seedance2TextToVideo        — POST /api/v1/seedance-v2.0-t2v
+  Seedance2ImageToVideo       — POST /api/v1/seedance-v2.0-i2v
+  Seedance2Extend             — POST /api/v1/seedance-v2.0-extend
+  Seedance2Omni               — POST /api/v1/seedance-2.0-omni-reference
+  Seedance2Character          — POST /api/v1/seedance-2-character
+  Seedance2ConsistentVideo    — POST /api/v1/seedance-v2.0-i2v (with character sheet as anchor)
+
+Consistent character workflow:
+  LoadImage → Seedance2Character → Seedance2ConsistentVideo
 
 Auth:     x-api-key header
 Polling:  GET /api/v1/predictions/{request_id}/result
@@ -97,6 +101,23 @@ def _output_url(result):
     for k in ("video_url", "url"):
         if result.get(k): return str(result[k])
     raise RuntimeError(f"No output URL: {result}")
+
+def _image_url(result):
+    """Extract image URL from a character sheet result."""
+    out = result.get("outputs") or result.get("output") or []
+    if isinstance(out, list) and out: return str(out[0])
+    if isinstance(out, str): return out
+    for k in ("image_url", "sheet_url", "url"):
+        if result.get(k): return str(result[k])
+    raise RuntimeError(f"No image URL in result: {result}")
+
+def _download_image(url):
+    """Download a remote image and return a ComfyUI IMAGE tensor (1,H,W,3)."""
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    img = Image.open(io.BytesIO(r.content)).convert("RGB")
+    arr = np.array(img).astype(np.float32) / 255.0
+    return torch.from_numpy(arr).unsqueeze(0)
 
 def _check(resp):
     if resp.status_code == 401: raise RuntimeError("Auth failed — check API key.")
@@ -357,43 +378,40 @@ class Seedance2Omni:
 
 class Seedance2Character:
     """
-    Seedance 2.0 Character
-    -----------------------
-    Create a reusable fictional character sheet from 1–5 reference photos of a real person.
+    Seedance 2.0 Consistent Character
+    -----------------------------------
+    Generate a multi-panel character sheet (front, back, side, action pose,
+    facial expressions, accessories) from 1–3 reference photos of a real person.
 
-    Once completed the node outputs the request_id. Wire that into a
-    Seedance2TextToVideo or Seedance2ImageToVideo prompt as:
-        @character:<request_id>
+    Outputs:
+      • sheet_image  — ComfyUI IMAGE tensor of the character sheet (wire into
+                       Seedance2ConsistentVideo or any image node)
+      • sheet_url    — CDN URL of the character sheet image
+      • character_id — request_id of this generation (for reference/logging)
 
-    Example T2V prompt:
-        "@character:ab539e5f-... rides a motorcycle through a neon-lit city at night"
-
-    The server resolves the character sheet URL automatically and injects the
-    image into the generation request.
+    Typical workflow:
+      LoadImage → Seedance2Character → Seedance2ConsistentVideo
     """
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "outfit_description": ("STRING", {"multiline": True,
                 "default": "cyberpunk jacket with neon accents, glowing visor",
-                "tooltip": "Describe the desired outfit/style for the fictional character"}),
+                "tooltip": "Describe the desired outfit/style for the character sheet"}),
         }, "optional": {
-            "api_key":        ("STRING", {"multiline": False, "default": ""}),
-            "character_name": ("STRING", {"multiline": False, "default": "",
-                "tooltip": "Optional display name for the character"}),
-            # Up to 5 reference photos of the person
+            "api_key": ("STRING", {"multiline": False, "default": ""}),
+            # Up to 3 reference photos (server hard-cap)
             "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
-            "image_4": ("IMAGE",), "image_5": ("IMAGE",),
         }}
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("character_id",)
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING")
+    RETURN_NAMES = ("sheet_image", "sheet_url", "character_id")
     FUNCTION = "run"
     CATEGORY = "🌱 Seedance 2.0"
 
-    def run(self, outfit_description, api_key="", character_name="",
-            image_1=None, image_2=None, image_3=None, image_4=None, image_5=None):
+    def run(self, outfit_description, api_key="",
+            image_1=None, image_2=None, image_3=None):
         api_key = _load_api_key(api_key)
-        tensors = [image_1, image_2, image_3, image_4, image_5]
+        tensors = [image_1, image_2, image_3]
         images_list = []
         for i, img in enumerate(tensors, 1):
             if img is not None:
@@ -402,39 +420,120 @@ class Seedance2Character:
         if not images_list:
             raise ValueError("At least one reference image is required to create a character.")
 
-        payload: dict = {
+        payload = {
             "images_list": images_list,
-            "outfit_description": outfit_description.strip(),
+            "prompt": outfit_description.strip(),
         }
-        if character_name.strip():
-            payload["character_name"] = character_name.strip()
 
         print(f"[Seedance2 Character] Creating character sheet from {len(images_list)} image(s)...")
         rid = _submit(api_key, "seedance-2-character", payload)
-
-        # Poll until the character sheet is ready
         result = _poll(api_key, rid)
-        sheet_url = (result.get("output_data") or result).get("sheet_url") or ""
-        if sheet_url:
-            print(f"[Seedance2 Character] Sheet ready → {sheet_url}")
-        print(f"[Seedance2 Character] Use in prompt: @character:{rid}")
-        return (rid,)
+
+        sheet_url = _image_url(result)
+        print(f"[Seedance2 Character] Sheet ready → {sheet_url}")
+        sheet_image = _download_image(sheet_url)
+        return (sheet_image, sheet_url, rid)
+
+
+class Seedance2ConsistentVideo:
+    """
+    Seedance 2.0 Consistent Character Video
+    -----------------------------------------
+    Generate a video that maintains character identity from a character sheet
+    produced by Seedance2Character.
+
+    Wire sheet_image (or sheet_url) from Seedance2Character into this node,
+    then write your scene prompt. The character sheet is automatically passed
+    as the first reference image and referenced as @image1 in the prompt.
+
+    You can also wire in up to 2 additional scene/background images
+    (referenced as @image2, @image3 in your prompt).
+
+    Example prompt:
+        "@image1 rides a motorcycle through a neon-lit city at night, cinematic"
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "prompt": ("STRING", {"multiline": True,
+                "default": "@image1 walks through a sunlit garden, cinematic motion, 4K"}),
+            "aspect_ratio": (["16:9", "9:16", "4:3", "3:4"], {"default": "16:9"}),
+            "quality": (["basic", "high"], {"default": "basic"}),
+            "duration": ([5, 10, 15], {"default": 5}),
+        }, "optional": {
+            "api_key":         ("STRING", {"multiline": False, "default": ""}),
+            # Character sheet — connect sheet_image from Seedance2Character
+            "sheet_image":     ("IMAGE",),
+            # Fallback: paste the sheet_url string if you don't have the tensor
+            "sheet_url":       ("STRING", {"multiline": False, "default": ""}),
+            # Optional extra scene/background images (@image2, @image3)
+            "scene_image_2":   ("IMAGE",),
+            "scene_image_3":   ("IMAGE",),
+        }}
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("video_url", "first_frame", "request_id")
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, prompt, aspect_ratio, quality, duration, api_key="",
+            sheet_image=None, sheet_url="", scene_image_2=None, scene_image_3=None):
+        api_key = _load_api_key(api_key)
+
+        images_list = []
+
+        # Character sheet goes first — either from tensor or URL
+        if sheet_image is not None:
+            print("[Seedance2 ConsistentVideo] Uploading character sheet...")
+            images_list.append(_upload_image(api_key, sheet_image))
+        elif sheet_url and sheet_url.strip():
+            images_list.append(sheet_url.strip())
+        else:
+            raise ValueError(
+                "Connect sheet_image (from Seedance2Character) or paste sheet_url."
+            )
+
+        # Optional extra images
+        for i, img in enumerate([scene_image_2, scene_image_3], 2):
+            if img is not None:
+                print(f"[Seedance2 ConsistentVideo] Uploading scene image {i}...")
+                images_list.append(_upload_image(api_key, img))
+
+        # Ensure @image1 is present so the model anchors on the character sheet
+        if "@image1" not in prompt:
+            prompt = f"@image1 {prompt.strip()}"
+
+        payload = {
+            "prompt": prompt,
+            "images_list": images_list,
+            "aspect_ratio": aspect_ratio,
+            "quality": quality,
+            "duration": duration,
+        }
+
+        print(f"[Seedance2 ConsistentVideo] Submitting with {len(images_list)} image(s)...")
+        rid = _submit(api_key, "seedance-v2.0-i2v", payload)
+        result = _poll(api_key, rid)
+        url = _output_url(result)
+        print(f"[Seedance2 ConsistentVideo] Done → {url}")
+        return (url, _first_frame(url), rid)
 
 
 NODE_CLASS_MAPPINGS = {
-    "Seedance2ApiKey":       Seedance2ApiKey,
-    "Seedance2TextToVideo":  Seedance2TextToVideo,
-    "Seedance2ImageToVideo": Seedance2ImageToVideo,
-    "Seedance2Extend":       Seedance2Extend,
-    "Seedance2Omni":         Seedance2Omni,
-    "Seedance2Character":    Seedance2Character,
+    "Seedance2ApiKey":            Seedance2ApiKey,
+    "Seedance2TextToVideo":       Seedance2TextToVideo,
+    "Seedance2ImageToVideo":      Seedance2ImageToVideo,
+    "Seedance2Extend":            Seedance2Extend,
+    "Seedance2Omni":              Seedance2Omni,
+    "Seedance2Character":         Seedance2Character,
+    "Seedance2ConsistentVideo":   Seedance2ConsistentVideo,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Seedance2ApiKey":       "🔑 Seedance 2.0 API Key",
-    "Seedance2TextToVideo":  "🌱 Seedance 2.0 Text-to-Video",
-    "Seedance2ImageToVideo": "🌱 Seedance 2.0 Image-to-Video",
-    "Seedance2Extend":       "🌱 Seedance 2.0 Extend",
-    "Seedance2Omni":         "🌱 Seedance 2.0 Omni Reference",
-    "Seedance2Character":    "🌱 Seedance 2.0 Character",
+    "Seedance2ApiKey":            "🔑 Seedance 2.0 API Key",
+    "Seedance2TextToVideo":       "🌱 Seedance 2.0 Text-to-Video",
+    "Seedance2ImageToVideo":      "🌱 Seedance 2.0 Image-to-Video",
+    "Seedance2Extend":            "🌱 Seedance 2.0 Extend",
+    "Seedance2Omni":              "🌱 Seedance 2.0 Omni Reference",
+    "Seedance2Character":         "🌱 Seedance 2.0 Consistent Character",
+    "Seedance2ConsistentVideo":   "🌱 Seedance 2.0 Consistent Character Video",
 }
