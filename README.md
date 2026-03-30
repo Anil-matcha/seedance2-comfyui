@@ -200,7 +200,12 @@ Downloads the generated video to ComfyUI's output folder and returns all frames 
 
 ## Example Workflows
 
-Load `Seedance2_T2V_Example.json` from this repo via **File → Load** in ComfyUI.
+Load any `.json` file from this repo via **File → Load** in ComfyUI.
+
+| File | Description |
+|------|-------------|
+| `Seedance2_T2V_Example.json` | Basic text-to-video generation |
+| `Seedance2_ConsistentCharacter_Example.json` | Full consistent character workflow: reference photo → character sheet → video |
 
 **Text-to-Video:**
 ```
@@ -211,10 +216,13 @@ Load `Seedance2_T2V_Example.json` from this repo via **File → Load** in ComfyU
 
 **Consistent Character:**
 ```
-[🔑 API Key] ─────────────────────────────────────────────────┐
-                                                               ↓
+[🔑 API Key] ─────────────────────────────────────────────────────────────┐
+                                                                           ↓
 [LoadImage] → [🌱 Consistent Character] → sheet_image → [🌱 Consistent Character Video] → [🌱 Save Video]
-               [outfit_description]        sheet_url         [scene prompt]
+               [outfit_description]          ↓               [scene prompt]
+                                    [Preview Image]                ↓
+                                    (character sheet)      [Preview Image]
+                                                           (first frame)
 ```
 
 ---
