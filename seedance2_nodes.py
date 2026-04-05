@@ -123,7 +123,13 @@ def _check(resp):
     if resp.status_code == 401: raise RuntimeError("Auth failed — check API key.")
     if resp.status_code == 402: raise RuntimeError("Insufficient credits — top up at muapi.ai")
     if resp.status_code == 429: raise RuntimeError("Rate limited — retry later.")
-    resp.raise_for_status()
+    if not resp.ok:
+        print(f"[Seedance2] API ERROR {resp.status_code}: {resp.text[:500]}")
+        try:
+            err = resp.json()
+            raise RuntimeError(f"API {resp.status_code}: {err}")
+        except Exception:
+            raise RuntimeError(f"API {resp.status_code}: {resp.text[:300]}")
 
 def _first_frame(video_url):
     try:
@@ -318,7 +324,9 @@ class Seedance2Omni:
             "aspect_ratio": (["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], {"default": "16:9"}),
             "duration": ("INT", {"default": 5, "min": 4, "max": 15, "step": 1}),
         }, "optional": {
-            "api_key":    ("STRING", {"multiline": False, "default": ""}),
+            "api_key":      ("STRING", {"multiline": False, "default": ""}),
+            "character_id": ("STRING", {"multiline": False, "default": "",
+                "tooltip": "character_id from Seedance2Character (connect directly)"}),
             # Reference images (uploaded from ComfyUI tensors)
             "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
             "image_4": ("IMAGE",), "image_5": ("IMAGE",), "image_6": ("IMAGE",),
@@ -338,6 +346,7 @@ class Seedance2Omni:
     CATEGORY = "🌱 Seedance 2.0"
 
     def run(self, prompt, aspect_ratio, duration, api_key="",
+            character_id="",
             image_1=None, image_2=None, image_3=None, image_4=None, image_5=None,
             image_6=None, image_7=None, image_8=None, image_9=None,
             video_url_1="", video_url_2="", video_url_3="",
@@ -360,6 +369,8 @@ class Seedance2Omni:
         audio_files = [u.strip() for u in [audio_url_1, audio_url_2, audio_url_3] if u and u.strip()]
 
         payload = {"prompt": prompt, "aspect_ratio": aspect_ratio, "duration": duration}
+        if character_id and character_id.strip():
+            payload["character_id"] = character_id.strip()
         if images_list:
             payload["images_list"] = images_list
         if video_files:
@@ -367,6 +378,7 @@ class Seedance2Omni:
         if audio_files:
             payload["audio_files"] = audio_files
 
+        print(f"[Seedance2 Omni] PAYLOAD: {payload}")
         print(f"[Seedance2 Omni] Submitting "
               f"({len(images_list)} image(s), {len(video_files)} video(s), {len(audio_files)} audio(s))...")
         rid = _submit(api_key, "seedance-2.0-omni-reference", payload)
@@ -429,9 +441,20 @@ class Seedance2Character:
         rid = _submit(api_key, "seedance-2-character", payload)
         result = _poll(api_key, rid)
 
-        sheet_url = _image_url(result)
-        print(f"[Seedance2 Character] Sheet ready → {sheet_url}")
-        sheet_image = _download_image(sheet_url)
+        # seedance-2-character returns only a character_id (UUID), not an image URL.
+        # Try to get a real URL; fall back to blank placeholder if not available.
+        try:
+            sheet_url = _image_url(result)
+            if not sheet_url.startswith("http"):
+                raise ValueError("Not a URL")
+            print(f"[Seedance2 Character] Sheet ready → {sheet_url}")
+            sheet_image = _download_image(sheet_url)
+        except Exception as e:
+            print(f"[Seedance2 Character] No sheet image ({e}), using placeholder.")
+            sheet_url = ""
+            sheet_image = torch.zeros(1, 64, 64, 3)
+
+        print(f"[Seedance2 Character] character_id = {rid}")
         return (sheet_image, sheet_url, rid)
 
 
