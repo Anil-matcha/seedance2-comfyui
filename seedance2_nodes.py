@@ -31,6 +31,24 @@ BASE_URL = "https://api.muapi.ai/api/v1"
 POLL_INTERVAL = 10
 MAX_WAIT = 900
 
+VIDEO_EXTS = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")
+AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus")
+_NONE_CHOICE = "(none)"
+
+def _list_input_files(extensions):
+    """Return sorted list of files in ComfyUI/input/ matching the given extensions."""
+    try:
+        import folder_paths
+        input_dir = folder_paths.get_input_directory()
+        files = [
+            f for f in os.listdir(input_dir)
+            if os.path.isfile(os.path.join(input_dir, f))
+            and f.lower().endswith(extensions)
+        ]
+        return [_NONE_CHOICE] + sorted(files)
+    except Exception:
+        return [_NONE_CHOICE]
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _load_api_key(api_key_input):
@@ -63,6 +81,49 @@ def _upload_image(api_key, image_tensor):
                          headers={"x-api-key": api_key},
                          files={"file": ("image.jpg", buf, "image/jpeg")},
                          timeout=120)
+    _check(resp)
+    return _url(resp.json())
+
+# Resolve a user-supplied media reference to a URL.
+# Rules:
+#   - empty / whitespace   → None
+#   - starts with http(s)  → returned as-is (already a URL)
+#   - existing local file  → uploaded via /upload_file, returned URL
+#   - anything else        → tried as a path under ComfyUI/input/, else error
+def _resolve_media_ref(api_key, ref, kind):
+    import mimetypes
+    if not ref or not ref.strip():
+        return None
+    ref = ref.strip().strip('"').strip("'")
+    if ref.lower().startswith(("http://", "https://")):
+        return ref
+    # Resolve relative paths against ComfyUI/input/ if not already absolute/existing
+    path = ref
+    if not os.path.isfile(path):
+        try:
+            import folder_paths  # provided by ComfyUI
+            candidate = os.path.join(folder_paths.get_input_directory(), ref)
+            if os.path.isfile(candidate):
+                path = candidate
+        except Exception:
+            pass
+    if not os.path.isfile(path):
+        raise RuntimeError(
+            f"[Seedance2 Omni] {kind} reference not found: {ref!r}. "
+            f"Provide an http(s) URL, an absolute file path, or a filename inside ComfyUI/input/."
+        )
+    mime, _ = mimetypes.guess_type(path)
+    if not mime:
+        mime = "video/mp4" if kind == "video" else "audio/mpeg"
+    filename = os.path.basename(path)
+    print(f"[Seedance2 Omni] Uploading {kind}: {filename} ({mime})")
+    with open(path, "rb") as f:
+        resp = requests.post(
+            f"{BASE_URL}/upload_file",
+            headers={"x-api-key": api_key},
+            files={"file": (filename, f, mime)},
+            timeout=600,
+        )
     _check(resp)
     return _url(resp.json())
 
@@ -307,8 +368,14 @@ class Seedance2Omni:
 
     Reference media in the prompt using:
       @image1 … @image9   — uploaded image tensors
-      @video1 … @video3   — video clip URLs
-      @audio1 … @audio3   — audio clip URLs
+      @video1 … @video3   — video clip (local file path OR http/https URL)
+      @audio1 … @audio3   — audio clip (local file path OR http/https URL)
+
+    The video_* / audio_* fields accept any of:
+      - an absolute path to a local file (e.g. D:\\clips\\a.mp4)
+      - a filename inside ComfyUI/input/ (e.g. my_clip.mp4)
+      - an http(s) URL (passed through unchanged)
+    Local files are auto-uploaded to the API before submission.
 
     Example:
       "A person @image1 walking on the beach at sunset, cinematic lighting"
@@ -318,6 +385,14 @@ class Seedance2Omni:
     """
     @classmethod
     def INPUT_TYPES(cls):
+        video_files = _list_input_files(VIDEO_EXTS)
+        audio_files = _list_input_files(AUDIO_EXTS)
+        video_tip = ("Pick a video file from ComfyUI/input/. "
+                     "Leave as (none) to use the URL/path override field instead.")
+        audio_tip = ("Pick an audio file from ComfyUI/input/. "
+                     "Leave as (none) to use the URL/path override field instead.")
+        override_tip = ("Optional override: http(s) URL or absolute local path. "
+                        "Used only if the dropdown above is (none).")
         return {"required": {
             "prompt": ("STRING", {"multiline": True,
                 "default": "A person @image1 walking on the beach at sunset, cinematic lighting"}),
@@ -331,14 +406,20 @@ class Seedance2Omni:
             "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
             "image_4": ("IMAGE",), "image_5": ("IMAGE",), "image_6": ("IMAGE",),
             "image_7": ("IMAGE",), "image_8": ("IMAGE",), "image_9": ("IMAGE",),
-            # Reference video URLs (@video1 … @video3)
-            "video_url_1": ("STRING", {"multiline": False, "default": ""}),
-            "video_url_2": ("STRING", {"multiline": False, "default": ""}),
-            "video_url_3": ("STRING", {"multiline": False, "default": ""}),
-            # Reference audio URLs (@audio1 … @audio3)
-            "audio_url_1": ("STRING", {"multiline": False, "default": ""}),
-            "audio_url_2": ("STRING", {"multiline": False, "default": ""}),
-            "audio_url_3": ("STRING", {"multiline": False, "default": ""}),
+            # Reference videos (@video1 … @video3): dropdown + override string
+            "video_file_1": (video_files, {"default": _NONE_CHOICE, "tooltip": video_tip}),
+            "video_url_1":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            "video_file_2": (video_files, {"default": _NONE_CHOICE, "tooltip": video_tip}),
+            "video_url_2":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            "video_file_3": (video_files, {"default": _NONE_CHOICE, "tooltip": video_tip}),
+            "video_url_3":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            # Reference audio (@audio1 … @audio3): dropdown + override string
+            "audio_file_1": (audio_files, {"default": _NONE_CHOICE, "tooltip": audio_tip}),
+            "audio_url_1":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            "audio_file_2": (audio_files, {"default": _NONE_CHOICE, "tooltip": audio_tip}),
+            "audio_url_2":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            "audio_file_3": (audio_files, {"default": _NONE_CHOICE, "tooltip": audio_tip}),
+            "audio_url_3":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
         }}
     RETURN_TYPES = ("STRING", "IMAGE", "STRING")
     RETURN_NAMES = ("video_url", "first_frame", "request_id")
@@ -349,8 +430,12 @@ class Seedance2Omni:
             character_id="",
             image_1=None, image_2=None, image_3=None, image_4=None, image_5=None,
             image_6=None, image_7=None, image_8=None, image_9=None,
-            video_url_1="", video_url_2="", video_url_3="",
-            audio_url_1="", audio_url_2="", audio_url_3=""):
+            video_file_1=_NONE_CHOICE, video_url_1="",
+            video_file_2=_NONE_CHOICE, video_url_2="",
+            video_file_3=_NONE_CHOICE, video_url_3="",
+            audio_file_1=_NONE_CHOICE, audio_url_1="",
+            audio_file_2=_NONE_CHOICE, audio_url_2="",
+            audio_file_3=_NONE_CHOICE, audio_url_3=""):
         api_key = _load_api_key(api_key)
 
         # Upload image tensors
@@ -362,11 +447,35 @@ class Seedance2Omni:
                 print(f"[Seedance2 Omni] Uploading image {i}...")
                 images_list.append(_upload_image(api_key, img))
 
-        # Collect video URLs
-        video_files = [u.strip() for u in [video_url_1, video_url_2, video_url_3] if u and u.strip()]
+        # For each slot, prefer the dropdown selection; fall back to the URL/path override.
+        def _pick(dropdown, url):
+            if dropdown and dropdown != _NONE_CHOICE:
+                return dropdown  # filename inside ComfyUI/input/ — _resolve_media_ref handles it
+            return url
 
-        # Collect audio URLs
-        audio_files = [u.strip() for u in [audio_url_1, audio_url_2, audio_url_3] if u and u.strip()]
+        video_refs = [
+            _pick(video_file_1, video_url_1),
+            _pick(video_file_2, video_url_2),
+            _pick(video_file_3, video_url_3),
+        ]
+        audio_refs = [
+            _pick(audio_file_1, audio_url_1),
+            _pick(audio_file_2, audio_url_2),
+            _pick(audio_file_3, audio_url_3),
+        ]
+
+        # Resolve references (local path → upload, URL → passthrough)
+        video_files = []
+        for u in video_refs:
+            resolved = _resolve_media_ref(api_key, u, "video")
+            if resolved:
+                video_files.append(resolved)
+
+        audio_files = []
+        for u in audio_refs:
+            resolved = _resolve_media_ref(api_key, u, "audio")
+            if resolved:
+                audio_files.append(resolved)
 
         payload = {"prompt": prompt, "aspect_ratio": aspect_ratio, "duration": duration}
         if character_id and character_id.strip():
