@@ -397,6 +397,7 @@ class Seedance2Omni:
             "prompt": ("STRING", {"multiline": True,
                 "default": "A person @image1 walking on the beach at sunset, cinematic lighting"}),
             "aspect_ratio": (["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], {"default": "16:9"}),
+            "quality": (["basic", "high"], {"default": "basic"}),
             "duration": ("INT", {"default": 5, "min": 4, "max": 15, "step": 1}),
         }, "optional": {
             "api_key":      ("STRING", {"multiline": False, "default": ""}),
@@ -426,7 +427,7 @@ class Seedance2Omni:
     FUNCTION = "run"
     CATEGORY = "🌱 Seedance 2.0"
 
-    def run(self, prompt, aspect_ratio, duration, api_key="",
+    def run(self, prompt, aspect_ratio, quality, duration, api_key="",
             character_id="",
             image_1=None, image_2=None, image_3=None, image_4=None, image_5=None,
             image_6=None, image_7=None, image_8=None, image_9=None,
@@ -477,7 +478,7 @@ class Seedance2Omni:
             if resolved:
                 audio_files.append(resolved)
 
-        payload = {"prompt": prompt, "aspect_ratio": aspect_ratio, "duration": duration}
+        payload = {"prompt": prompt, "aspect_ratio": aspect_ratio, "quality": quality, "duration": duration}
         if character_id and character_id.strip():
             payload["character_id"] = character_id.strip()
         if images_list:
