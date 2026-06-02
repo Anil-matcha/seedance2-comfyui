@@ -4,6 +4,12 @@ Integrate **ByteDance Seedance 2.0** into your **n8n** workflows for high-qualit
 
 ![Seedance 2.0 n8n Node](https://muapi.ai/muapi-logo.svg)
 
+## Related Projects
+
+- [n8n-nodes-muapi](https://github.com/SamurAIGPT/n8n-nodes-muapi) — n8n community nodes for 60+ MuAPI models including Seedance
+- [seedance-2-generator](https://github.com/SamurAIGPT/seedance-2-generator) — Ready-made Next.js SaaS for Seedance 2 generation
+- [seedance2-comfyui](https://github.com/Anil-matcha/seedance2-comfyui) — Run Seedance 2 inside ComfyUI
+
 ## About
 
 This node is a specialized version of the [MuAPI n8n community node](https://github.com/SamurAIGPT/n8n-nodes-muapi), optimized specifically for **Seedance 2.0**. For access to all generative AI models (Flux, Wan, Suno, etc.), please check out the main [n8n-nodes-muapi](https://github.com/SamurAIGPT/n8n-nodes-muapi) repository.
