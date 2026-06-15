@@ -1,6 +1,6 @@
-# n8n-nodes-seedance2: ByteDance Seedance 2.0 AI Video Generation Node for n8n
+# n8n-nodes-seedance2: ByteDance Seedance 2.0 & Seedance 2 Mini AI Video Generation Node for n8n
 
-Integrate **ByteDance Seedance 2.0** into your **n8n** workflows for high-quality **AI video generation**. This community node allows you to automate **Text-to-Video**, **Image-to-Video**, and **Video Extension** directly within your no-code automation pipeline. If you are just looking for Seedance 2.0 api check this [Seedance 2.0 api](https://github.com/Anil-matcha/Seedance-2.0-API)
+Integrate **ByteDance Seedance 2.0** and **Seedance 2 Mini** into your **n8n** workflows for high-quality **AI video generation**. This community node allows you to automate **Text-to-Video**, **Image-to-Video**, **Video Extension**, and the new lightweight **Seedance 2 Mini** model directly within your no-code automation pipeline. If you are just looking for the Python API check this [Seedance 2 API](https://github.com/Anil-matcha/Seedance-2-API)
 
 ![Seedance 2.0 n8n Node](https://muapi.ai/muapi-logo.svg)
 
@@ -16,8 +16,9 @@ This node is a specialized version of the [MuAPI n8n community node](https://git
 
 ## Why use n8n-nodes-seedance2?
 
-Seedance 2.0 is a cutting-edge multimodal video generation model by ByteDance. This node makes it accessible to n8n users, enabling:
-- **Cinematic AI Video:** Transform text prompts into stunning realistic videos.
+Seedance 2.0 and Seedance 2 Mini are cutting-edge multimodal video generation models by ByteDance. This node makes both accessible to n8n users, enabling:
+- **Cinematic AI Video:** Transform text prompts into stunning realistic videos with Seedance 2.0.
+- **Seedance 2 Mini:** Fast, affordable video generation at ~$0.073/sec — perfect for high-volume n8n pipelines and automated content workflows.
 - **Dynamic Animation:** Animate static images into lifelike sequences.
 - **AI Video Extension:** Continue existing videos seamlessly with visual and audio consistency.
 - **Watermark Removal:** Pro-level watermark removal using LaMa AI inpainting.
@@ -25,8 +26,9 @@ Seedance 2.0 is a cutting-edge multimodal video generation model by ByteDance. T
 
 ## Key Features
 
-- **Text-to-Video (T2V):** High-resolution video output from simple descriptions.
+- **Text-to-Video (T2V):** High-resolution video output from simple descriptions using Seedance 2.0 or Seedance 2 Mini.
 - **Image-to-Video (I2V):** Precise animation of start/end frames.
+- **Seedance 2 Mini T2V & I2V:** Lightweight model for fast, cost-effective generation — ideal for bulk automation in n8n.
 - **Advanced Controls:** Configure aspect ratios (16:9, 9:16, 1:1) and poll settings.
 - **Watermark Remover:** Automated mask detection and artifact-free inpainting.
 
@@ -56,7 +58,7 @@ npm install n8n-nodes-seedance2
 
 ## Optimized Keywords
 
-n8n community node, seedance, seedance 2.0, bytedance, ai video generation, text to video, image to video, generative ai, sora alternative, ai automation, video ai, workflow automation, muapi, byte dance, ai video extension, watermark remover, no code ai, video editor ai, low code automation, multimodal ai
+n8n community node, seedance, seedance 2.0, seedance 2 mini, seedance 2 mini n8n, bytedance, ai video generation, text to video, image to video, generative ai, sora alternative, ai automation, video ai, workflow automation, muapi, byte dance, ai video extension, watermark remover, no code ai, video editor ai, low code automation, multimodal ai, seedance mini, seedance 2 mini api
 
 ---
 
