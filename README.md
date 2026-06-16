@@ -2,7 +2,7 @@
 
 Integrate **ByteDance Seedance 2.0** and **Seedance 2 Mini** into your **n8n** workflows for high-quality **AI video generation**. This community node allows you to automate **Text-to-Video**, **Image-to-Video**, **Video Extension**, and the new lightweight **Seedance 2 Mini** model directly within your no-code automation pipeline. If you are just looking for the Python API check this [Seedance 2 API](https://github.com/Anil-matcha/Seedance-2-API)
 
-![Seedance 2.0 n8n Node](https://muapi.ai/muapi-logo.svg)
+![Seedance 2.0 n8n Node](https://muapi.ai/muapi-logo.svg?utm_source=github&utm_medium=readme&utm_campaign=n8n-nodes-seedance2)
 
 ## Related Projects
 
@@ -50,7 +50,7 @@ npm install n8n-nodes-seedance2
 
 ## How to Configure
 
-1. Get your **MuAPI API Key** at [muapi.ai/access-keys](https://muapi.ai/access-keys).
+1. Get your **MuAPI API Key** at [muapi.ai/access-keys](https://muapi.ai/access-keys?utm_source=github&utm_medium=readme&utm_campaign=n8n-nodes-seedance2).
 2. Add the **Seedance 2.0** node to your n8n canvas.
 3. Create a new credential and paste your API Key.
 4. Select your generation category and model.
@@ -62,4 +62,4 @@ n8n community node, seedance, seedance 2.0, seedance 2 mini, seedance 2 mini n8n
 
 ---
 
-**Built with ❤️ for the n8n community.** For support, visit [muapi.ai](https://muapi.ai).
+**Built with ❤️ for the n8n community.** For support, visit [muapi.ai](https://muapi.ai?utm_source=github&utm_medium=readme&utm_campaign=n8n-nodes-seedance2).
