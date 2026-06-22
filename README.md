@@ -18,6 +18,14 @@
 - [muapi-comfyui](https://github.com/SamurAIGPT/muapi-comfyui) — ComfyUI nodes for 100+ MuAPI models including Seedance
 - [awesome-seedance-2.5-api-prompts](https://github.com/Anil-matcha/awesome-seedance-2.5-api-prompts) — Curated Seedance 2.5 API guide, prompts, camera controls, and video generation examples
 
+## 🧪 Try in the Muapi Playground (no ComfyUI needed)
+
+| Model | Image-to-Video | Text-to-Video |
+|-------|---------------|---------------|
+| Seedance 2.0 Mini *(coming soon)* | [Playground](https://muapi.ai/playground/seedance-2.0-mini-image-to-video?utm_source=github&utm_medium=readme&utm_campaign=seedance2-comfyui) | [Playground](https://muapi.ai/playground/seedance-2.0-mini-text-to-video?utm_source=github&utm_medium=readme&utm_campaign=seedance2-comfyui) |
+| Seedance 2.1 *(coming soon)* | [Playground](https://muapi.ai/playground/seedance-2.1-image-to-video?utm_source=github&utm_medium=readme&utm_campaign=seedance2-comfyui) | [Playground](https://muapi.ai/playground/seedance-2.1-text-to-video?utm_source=github&utm_medium=readme&utm_campaign=seedance2-comfyui) |
+| Seedance 2.5 *(coming soon)* | [Playground](https://muapi.ai/playground/seedance-2.5-image-to-video?utm_source=github&utm_medium=readme&utm_campaign=seedance2-comfyui) | [Playground](https://muapi.ai/playground/seedance-2.5-text-to-video?utm_source=github&utm_medium=readme&utm_campaign=seedance2-comfyui) |
+
 ## What is Seedance 2.0?
 
 Seedance 2.0 is ByteDance's latest video generation model, capable of producing high-quality, photorealistic videos from text prompts or reference images. It supports:
