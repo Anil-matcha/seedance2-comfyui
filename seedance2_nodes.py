@@ -1,0 +1,672 @@
+"""
+MuAPI Seedance 2.0 ComfyUI Nodes
+==================================
+Focused nodes for Seedance 2.0 video generation via muapi.ai.
+
+  Seedance2TextToVideo        — POST /api/v1/seedance-v2.0-t2v
+  Seedance2ImageToVideo       — POST /api/v1/seedance-v2.0-i2v
+  Seedance2Extend             — POST /api/v1/seedance-v2.0-extend
+  Seedance2Omni               — POST /api/v1/seedance-2.0-omni-reference
+  Seedance2Character          — POST /api/v1/seedance-2-character
+  Seedance2ConsistentVideo    — POST /api/v1/seedance-v2.0-i2v (with character sheet as anchor)
+
+Consistent character workflow:
+  LoadImage → Seedance2Character → Seedance2ConsistentVideo
+
+Auth:     x-api-key header
+Polling:  GET /api/v1/predictions/{request_id}/result
+Upload:   POST /api/v1/upload_file
+"""
+
+import io
+import os
+import time
+
+import numpy as np
+import requests
+import torch
+from PIL import Image
+
+BASE_URL = "https://api.muapi.ai/api/v1"
+POLL_INTERVAL = 10
+MAX_WAIT = 900
+
+VIDEO_EXTS = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")
+AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus")
+_NONE_CHOICE = "(none)"
+
+def _list_input_files(extensions):
+    """Return sorted list of files in ComfyUI/input/ matching the given extensions."""
+    try:
+        import folder_paths
+        input_dir = folder_paths.get_input_directory()
+        files = [
+            f for f in os.listdir(input_dir)
+            if os.path.isfile(os.path.join(input_dir, f))
+            and f.lower().endswith(extensions)
+        ]
+        return [_NONE_CHOICE] + sorted(files)
+    except Exception:
+        return [_NONE_CHOICE]
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _load_api_key(api_key_input):
+    """Return api_key_input if set, otherwise fall back to ~/.muapi/config.json."""
+    if api_key_input and api_key_input.strip():
+        return api_key_input.strip()
+    config_path = os.path.expanduser("~/.muapi/config.json")
+    if os.path.isfile(config_path):
+        try:
+            import json as _json
+            with open(config_path) as f:
+                key = _json.load(f).get("api_key", "")
+            if key:
+                return key
+        except Exception:
+            pass
+    raise RuntimeError(
+        "No API key found. Either paste your key into the api_key field, "
+        "or run `muapi auth configure --api-key YOUR_KEY` in a terminal."
+    )
+
+def _upload_image(api_key, image_tensor):
+    if image_tensor.dim() == 4:
+        image_tensor = image_tensor[0]
+    arr = (image_tensor.cpu().numpy() * 255).astype("uint8")
+    buf = io.BytesIO()
+    Image.fromarray(arr, "RGB").save(buf, format="JPEG", quality=95)
+    buf.seek(0)
+    resp = requests.post(f"{BASE_URL}/upload_file",
+                         headers={"x-api-key": api_key},
+                         files={"file": ("image.jpg", buf, "image/jpeg")},
+                         timeout=120)
+    _check(resp)
+    return _url(resp.json())
+
+# Resolve a user-supplied media reference to a URL.
+# Rules:
+#   - empty / whitespace   → None
+#   - starts with http(s)  → returned as-is (already a URL)
+#   - existing local file  → uploaded via /upload_file, returned URL
+#   - anything else        → tried as a path under ComfyUI/input/, else error
+def _resolve_media_ref(api_key, ref, kind):
+    import mimetypes
+    if not ref or not ref.strip():
+        return None
+    ref = ref.strip().strip('"').strip("'")
+    if ref.lower().startswith(("http://", "https://")):
+        return ref
+    # Resolve relative paths against ComfyUI/input/ if not already absolute/existing
+    path = ref
+    if not os.path.isfile(path):
+        try:
+            import folder_paths  # provided by ComfyUI
+            candidate = os.path.join(folder_paths.get_input_directory(), ref)
+            if os.path.isfile(candidate):
+                path = candidate
+        except Exception:
+            pass
+    if not os.path.isfile(path):
+        raise RuntimeError(
+            f"[Seedance2 Omni] {kind} reference not found: {ref!r}. "
+            f"Provide an http(s) URL, an absolute file path, or a filename inside ComfyUI/input/."
+        )
+    mime, _ = mimetypes.guess_type(path)
+    if not mime:
+        mime = "video/mp4" if kind == "video" else "audio/mpeg"
+    filename = os.path.basename(path)
+    print(f"[Seedance2 Omni] Uploading {kind}: {filename} ({mime})")
+    with open(path, "rb") as f:
+        resp = requests.post(
+            f"{BASE_URL}/upload_file",
+            headers={"x-api-key": api_key},
+            files={"file": (filename, f, mime)},
+            timeout=600,
+        )
+    _check(resp)
+    return _url(resp.json())
+
+def _url(data):
+    u = data.get("url") or data.get("file_url") or data.get("output")
+    if not u: raise RuntimeError(f"Upload missing URL: {data}")
+    return str(u)
+
+def _submit(api_key, endpoint, payload):
+    resp = requests.post(f"{BASE_URL}/{endpoint}",
+                         headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                         json=payload, timeout=60)
+    _check(resp)
+    rid = resp.json().get("request_id")
+    if not rid: raise RuntimeError(f"No request_id: {resp.json()}")
+    return rid
+
+def _poll(api_key, request_id):
+    deadline = time.time() + MAX_WAIT
+    while time.time() < deadline:
+        resp = requests.get(f"{BASE_URL}/predictions/{request_id}/result",
+                            headers={"x-api-key": api_key}, timeout=30)
+        _check(resp)
+        data = resp.json()
+        status = data.get("status")
+        print(f"[Seedance2] {status}  {request_id}")
+        if status == "completed": return data
+        if status == "failed": raise RuntimeError(f"Failed: {data.get('error','unknown')}")
+        time.sleep(POLL_INTERVAL)
+    raise RuntimeError(f"Timeout: {request_id}")
+
+def _output_url(result):
+    out = result.get("outputs") or result.get("output") or []
+    if isinstance(out, list) and out: return str(out[0])
+    if isinstance(out, str): return out
+    for k in ("video_url", "url"):
+        if result.get(k): return str(result[k])
+    raise RuntimeError(f"No output URL: {result}")
+
+def _image_url(result):
+    """Extract image URL from a character sheet result."""
+    out = result.get("outputs") or result.get("output") or []
+    if isinstance(out, list) and out: return str(out[0])
+    if isinstance(out, str): return out
+    for k in ("image_url", "sheet_url", "url"):
+        if result.get(k): return str(result[k])
+    raise RuntimeError(f"No image URL in result: {result}")
+
+def _download_image(url):
+    """Download a remote image and return a ComfyUI IMAGE tensor (1,H,W,3)."""
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    img = Image.open(io.BytesIO(r.content)).convert("RGB")
+    arr = np.array(img).astype(np.float32) / 255.0
+    return torch.from_numpy(arr).unsqueeze(0)
+
+def _check(resp):
+    if resp.status_code == 401: raise RuntimeError("Auth failed — check API key.")
+    if resp.status_code == 402: raise RuntimeError("Insufficient credits — top up at muapi.ai")
+    if resp.status_code == 429: raise RuntimeError("Rate limited — retry later.")
+    if not resp.ok:
+        print(f"[Seedance2] API ERROR {resp.status_code}: {resp.text[:500]}")
+        try:
+            err = resp.json()
+            raise RuntimeError(f"API {resp.status_code}: {err}")
+        except Exception:
+            raise RuntimeError(f"API {resp.status_code}: {resp.text[:300]}")
+
+def _first_frame(video_url):
+    try:
+        import tempfile, cv2
+        r = requests.get(video_url, timeout=180, stream=True)
+        r.raise_for_status()
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            for chunk in r.iter_content(8192):
+                if chunk: tmp.write(chunk)
+            path = tmp.name
+        cap = cv2.VideoCapture(path)
+        ret, frame = cap.read()
+        cap.release(); os.remove(path)
+        if not ret: raise RuntimeError("no frame")
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        return torch.from_numpy(rgb).unsqueeze(0)
+    except Exception as e:
+        print(f"[Seedance2] first frame failed: {e}")
+        return torch.zeros(1, 64, 64, 3)
+
+# ── Nodes ──────────────────────────────────────────────────────────────────────
+
+class Seedance2TextToVideo:
+    """
+    Seedance 2.0 Text-to-Video
+    ---------------------------
+    Generate video purely from a text prompt.
+    Aspect ratios: 16:9 | 9:16 | 4:3 | 3:4
+    Duration: 5 | 10 | 15 seconds
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "prompt": ("STRING", {"multiline": True,
+                "default": "A cinematic aerial shot of a futuristic city at dusk, volumetric lighting, 4K"}),
+            "aspect_ratio": (["16:9", "9:16", "4:3", "3:4"], {"default": "16:9"}),
+            "quality": (["basic", "high"], {"default": "basic"}),
+            "duration": ([5, 10, 15], {"default": 5}),
+        }, "optional": {
+            "api_key": ("STRING", {"multiline": False, "default": ""}),
+        }}
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("video_url", "first_frame", "request_id")
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, prompt, aspect_ratio, quality, duration, api_key=""):
+        api_key = _load_api_key(api_key)
+        payload = {"prompt": prompt, "aspect_ratio": aspect_ratio,
+                   "quality": quality, "duration": duration}
+        print("[Seedance2 T2V] Submitting...")
+        rid = _submit(api_key, "seedance-v2.0-t2v", payload)
+        result = _poll(api_key, rid)
+        url = _output_url(result)
+        print(f"[Seedance2 T2V] Done → {url}")
+        return (url, _first_frame(url), rid)
+
+
+class Seedance2ImageToVideo:
+    """
+    Seedance 2.0 Image-to-Video
+    ----------------------------
+    Connect up to 9 reference images. Reference them in the prompt
+    using @image1 … @image9.
+
+    Example: "The cat in @image1 walks through a sunlit garden."
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "prompt": ("STRING", {"multiline": True,
+                "default": "The character in @image1 walks through a beautiful garden, cinematic motion"}),
+            "aspect_ratio": (["16:9", "9:16", "4:3", "3:4"], {"default": "16:9"}),
+            "quality": (["basic", "high"], {"default": "basic"}),
+            "duration": ([5, 10, 15], {"default": 5}),
+        }, "optional": {
+            "api_key": ("STRING", {"multiline": False, "default": ""}),
+            "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
+            "image_4": ("IMAGE",), "image_5": ("IMAGE",), "image_6": ("IMAGE",),
+            "image_7": ("IMAGE",), "image_8": ("IMAGE",), "image_9": ("IMAGE",),
+        }}
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("video_url", "first_frame", "request_id")
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, prompt, aspect_ratio, quality, duration, api_key="",
+            image_1=None, image_2=None, image_3=None, image_4=None, image_5=None,
+            image_6=None, image_7=None, image_8=None, image_9=None):
+        api_key = _load_api_key(api_key)
+        tensors = [image_1, image_2, image_3, image_4, image_5,
+                   image_6, image_7, image_8, image_9]
+        images_list = []
+        for i, img in enumerate(tensors, 1):
+            if img is not None:
+                print(f"[Seedance2 I2V] Uploading image {i}...")
+                images_list.append(_upload_image(api_key, img))
+        if not images_list: raise ValueError("At least one image required.")
+        payload = {"prompt": prompt, "images_list": images_list,
+                   "aspect_ratio": aspect_ratio, "quality": quality, "duration": duration}
+        print(f"[Seedance2 I2V] Submitting ({len(images_list)} image(s))...")
+        rid = _submit(api_key, "seedance-v2.0-i2v", payload)
+        result = _poll(api_key, rid)
+        url = _output_url(result)
+        print(f"[Seedance2 I2V] Done → {url}")
+        return (url, _first_frame(url), rid)
+
+
+class Seedance2Extend:
+    """
+    Seedance 2.0 Extend Video
+    --------------------------
+    Extend a previously generated Seedance 2.0 video.
+    Pass the request_id from a completed generation.
+    Optionally provide a prompt to guide the continuation.
+    Duration: 5 | 10 | 15 seconds added to the original.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "request_id": ("STRING", {"multiline": False, "default": "",
+                "tooltip": "request_id from a completed Seedance 2.0 generation"}),
+            "quality": (["basic", "high"], {"default": "basic"}),
+            "duration": ([5, 10, 15], {"default": 5}),
+        }, "optional": {
+            "api_key": ("STRING", {"multiline": False, "default": ""}),
+            "prompt": ("STRING", {"multiline": True, "default": "",
+                "tooltip": "Optional continuation prompt"}),
+        }}
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("video_url", "first_frame", "new_request_id")
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, request_id, quality, duration, api_key="", prompt=""):
+        api_key = _load_api_key(api_key)
+        if not request_id.strip(): raise ValueError("request_id required.")
+        payload = {"request_id": request_id.strip(), "quality": quality, "duration": duration}
+        if prompt.strip(): payload["prompt"] = prompt.strip()
+        print(f"[Seedance2 Extend] Extending {request_id}...")
+        new_id = _submit(api_key, "seedance-v2.0-extend", payload)
+        result = _poll(api_key, new_id)
+        url = _output_url(result)
+        print(f"[Seedance2 Extend] Done → {url}")
+        return (url, _first_frame(url), new_id)
+
+
+class Seedance2ApiKey:
+    """
+    Store your MuAPI API key once and wire it to any Seedance 2.0 node.
+    Leave all node api_key fields empty — they auto-read from this node
+    or from ~/.muapi/config.json (set via `muapi auth configure`).
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "api_key": ("STRING", {"multiline": False, "default": "",
+                "tooltip": "Your muapi.ai API key. Get one at muapi.ai → Dashboard → API Keys"}),
+        }}
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("api_key",)
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, api_key):
+        return (_load_api_key(api_key),)
+
+
+class Seedance2Omni:
+    """
+    Seedance 2.0 Omni Reference
+    ----------------------------
+    Multi-modal generation: combine images, video clips, and audio clips
+    as reference material alongside a text prompt.
+
+    Reference media in the prompt using:
+      @image1 … @image9   — uploaded image tensors
+      @video1 … @video3   — video clip (local file path OR http/https URL)
+      @audio1 … @audio3   — audio clip (local file path OR http/https URL)
+
+    The video_* / audio_* fields accept any of:
+      - an absolute path to a local file (e.g. D:\\clips\\a.mp4)
+      - a filename inside ComfyUI/input/ (e.g. my_clip.mp4)
+      - an http(s) URL (passed through unchanged)
+    Local files are auto-uploaded to the API before submission.
+
+    Example:
+      "A person @image1 walking on the beach at sunset, cinematic lighting"
+
+    Aspect ratios: 21:9 | 16:9 | 4:3 | 1:1 | 3:4 | 9:16
+    Duration: 4 – 15 seconds
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        video_files = _list_input_files(VIDEO_EXTS)
+        audio_files = _list_input_files(AUDIO_EXTS)
+        video_tip = ("Pick a video file from ComfyUI/input/. "
+                     "Leave as (none) to use the URL/path override field instead.")
+        audio_tip = ("Pick an audio file from ComfyUI/input/. "
+                     "Leave as (none) to use the URL/path override field instead.")
+        override_tip = ("Optional override: http(s) URL or absolute local path. "
+                        "Used only if the dropdown above is (none).")
+        return {"required": {
+            "prompt": ("STRING", {"multiline": True,
+                "default": "A person @image1 walking on the beach at sunset, cinematic lighting"}),
+            "aspect_ratio": (["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], {"default": "16:9"}),
+            "quality": (["basic", "high"], {"default": "basic"}),
+            "duration": ("INT", {"default": 5, "min": 4, "max": 15, "step": 1}),
+        }, "optional": {
+            "api_key":      ("STRING", {"multiline": False, "default": ""}),
+            "character_id": ("STRING", {"multiline": False, "default": "",
+                "tooltip": "character_id from Seedance2Character (connect directly)"}),
+            # Reference images (uploaded from ComfyUI tensors)
+            "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
+            "image_4": ("IMAGE",), "image_5": ("IMAGE",), "image_6": ("IMAGE",),
+            "image_7": ("IMAGE",), "image_8": ("IMAGE",), "image_9": ("IMAGE",),
+            # Reference videos (@video1 … @video3): dropdown + override string
+            "video_file_1": (video_files, {"default": _NONE_CHOICE, "tooltip": video_tip}),
+            "video_url_1":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            "video_file_2": (video_files, {"default": _NONE_CHOICE, "tooltip": video_tip}),
+            "video_url_2":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            "video_file_3": (video_files, {"default": _NONE_CHOICE, "tooltip": video_tip}),
+            "video_url_3":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            # Reference audio (@audio1 … @audio3): dropdown + override string
+            "audio_file_1": (audio_files, {"default": _NONE_CHOICE, "tooltip": audio_tip}),
+            "audio_url_1":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            "audio_file_2": (audio_files, {"default": _NONE_CHOICE, "tooltip": audio_tip}),
+            "audio_url_2":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+            "audio_file_3": (audio_files, {"default": _NONE_CHOICE, "tooltip": audio_tip}),
+            "audio_url_3":  ("STRING", {"multiline": False, "default": "", "tooltip": override_tip}),
+        }}
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("video_url", "first_frame", "request_id")
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, prompt, aspect_ratio, quality, duration, api_key="",
+            character_id="",
+            image_1=None, image_2=None, image_3=None, image_4=None, image_5=None,
+            image_6=None, image_7=None, image_8=None, image_9=None,
+            video_file_1=_NONE_CHOICE, video_url_1="",
+            video_file_2=_NONE_CHOICE, video_url_2="",
+            video_file_3=_NONE_CHOICE, video_url_3="",
+            audio_file_1=_NONE_CHOICE, audio_url_1="",
+            audio_file_2=_NONE_CHOICE, audio_url_2="",
+            audio_file_3=_NONE_CHOICE, audio_url_3=""):
+        api_key = _load_api_key(api_key)
+
+        # Upload image tensors
+        image_tensors = [image_1, image_2, image_3, image_4, image_5,
+                         image_6, image_7, image_8, image_9]
+        images_list = []
+        for i, img in enumerate(image_tensors, 1):
+            if img is not None:
+                print(f"[Seedance2 Omni] Uploading image {i}...")
+                images_list.append(_upload_image(api_key, img))
+
+        # For each slot, prefer the dropdown selection; fall back to the URL/path override.
+        def _pick(dropdown, url):
+            if dropdown and dropdown != _NONE_CHOICE:
+                return dropdown  # filename inside ComfyUI/input/ — _resolve_media_ref handles it
+            return url
+
+        video_refs = [
+            _pick(video_file_1, video_url_1),
+            _pick(video_file_2, video_url_2),
+            _pick(video_file_3, video_url_3),
+        ]
+        audio_refs = [
+            _pick(audio_file_1, audio_url_1),
+            _pick(audio_file_2, audio_url_2),
+            _pick(audio_file_3, audio_url_3),
+        ]
+
+        # Resolve references (local path → upload, URL → passthrough)
+        video_files = []
+        for u in video_refs:
+            resolved = _resolve_media_ref(api_key, u, "video")
+            if resolved:
+                video_files.append(resolved)
+
+        audio_files = []
+        for u in audio_refs:
+            resolved = _resolve_media_ref(api_key, u, "audio")
+            if resolved:
+                audio_files.append(resolved)
+
+        payload = {"prompt": prompt, "aspect_ratio": aspect_ratio, "quality": quality, "duration": duration}
+        if character_id and character_id.strip():
+            payload["character_id"] = character_id.strip()
+        if images_list:
+            payload["images_list"] = images_list
+        if video_files:
+            payload["video_files"] = video_files
+        if audio_files:
+            payload["audio_files"] = audio_files
+
+        print(f"[Seedance2 Omni] PAYLOAD: {payload}")
+        print(f"[Seedance2 Omni] Submitting "
+              f"({len(images_list)} image(s), {len(video_files)} video(s), {len(audio_files)} audio(s))...")
+        rid = _submit(api_key, "seedance-2.0-omni-reference", payload)
+        result = _poll(api_key, rid)
+        url = _output_url(result)
+        print(f"[Seedance2 Omni] Done → {url}")
+        return (url, _first_frame(url), rid)
+
+
+class Seedance2Character:
+    """
+    Seedance 2.0 Consistent Character
+    -----------------------------------
+    Generate a multi-panel character sheet (front, back, side, action pose,
+    facial expressions, accessories) from 1–3 reference photos of a real person.
+
+    Outputs:
+      • sheet_image  — ComfyUI IMAGE tensor of the character sheet (wire into
+                       Seedance2ConsistentVideo or any image node)
+      • sheet_url    — CDN URL of the character sheet image
+      • character_id — request_id of this generation (for reference/logging)
+
+    Typical workflow:
+      LoadImage → Seedance2Character → Seedance2ConsistentVideo
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "outfit_description": ("STRING", {"multiline": True,
+                "default": "cyberpunk jacket with neon accents, glowing visor",
+                "tooltip": "Describe the desired outfit/style for the character sheet"}),
+        }, "optional": {
+            "api_key": ("STRING", {"multiline": False, "default": ""}),
+            # Up to 3 reference photos (server hard-cap)
+            "image_1": ("IMAGE",), "image_2": ("IMAGE",), "image_3": ("IMAGE",),
+        }}
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING")
+    RETURN_NAMES = ("sheet_image", "sheet_url", "character_id")
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, outfit_description, api_key="",
+            image_1=None, image_2=None, image_3=None):
+        api_key = _load_api_key(api_key)
+        tensors = [image_1, image_2, image_3]
+        images_list = []
+        for i, img in enumerate(tensors, 1):
+            if img is not None:
+                print(f"[Seedance2 Character] Uploading reference image {i}...")
+                images_list.append(_upload_image(api_key, img))
+        if not images_list:
+            raise ValueError("At least one reference image is required to create a character.")
+
+        payload = {
+            "images_list": images_list,
+            "prompt": outfit_description.strip(),
+        }
+
+        print(f"[Seedance2 Character] Creating character sheet from {len(images_list)} image(s)...")
+        rid = _submit(api_key, "seedance-2-character", payload)
+        result = _poll(api_key, rid)
+
+        # seedance-2-character returns only a character_id (UUID), not an image URL.
+        # Try to get a real URL; fall back to blank placeholder if not available.
+        try:
+            sheet_url = _image_url(result)
+            if not sheet_url.startswith("http"):
+                raise ValueError("Not a URL")
+            print(f"[Seedance2 Character] Sheet ready → {sheet_url}")
+            sheet_image = _download_image(sheet_url)
+        except Exception as e:
+            print(f"[Seedance2 Character] No sheet image ({e}), using placeholder.")
+            sheet_url = ""
+            sheet_image = torch.zeros(1, 64, 64, 3)
+
+        print(f"[Seedance2 Character] character_id = {rid}")
+        return (sheet_image, sheet_url, rid)
+
+
+class Seedance2ConsistentVideo:
+    """
+    Seedance 2.0 Consistent Character Video
+    -----------------------------------------
+    Generate a video that maintains character identity from a character sheet
+    produced by Seedance2Character.
+
+    Wire sheet_image (or sheet_url) from Seedance2Character into this node,
+    then write your scene prompt. The character sheet is automatically passed
+    as the first reference image and referenced as @image1 in the prompt.
+
+    You can also wire in up to 2 additional scene/background images
+    (referenced as @image2, @image3 in your prompt).
+
+    Example prompt:
+        "@image1 rides a motorcycle through a neon-lit city at night, cinematic"
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "prompt": ("STRING", {"multiline": True,
+                "default": "@image1 walks through a sunlit garden, cinematic motion, 4K"}),
+            "aspect_ratio": (["16:9", "9:16", "4:3", "3:4"], {"default": "16:9"}),
+            "quality": (["basic", "high"], {"default": "basic"}),
+            "duration": ([5, 10, 15], {"default": 5}),
+        }, "optional": {
+            "api_key":         ("STRING", {"multiline": False, "default": ""}),
+            # Character sheet — connect sheet_image from Seedance2Character
+            "sheet_image":     ("IMAGE",),
+            # Fallback: paste the sheet_url string if you don't have the tensor
+            "sheet_url":       ("STRING", {"multiline": False, "default": ""}),
+            # Optional extra scene/background images (@image2, @image3)
+            "scene_image_2":   ("IMAGE",),
+            "scene_image_3":   ("IMAGE",),
+        }}
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("video_url", "first_frame", "request_id")
+    FUNCTION = "run"
+    CATEGORY = "🌱 Seedance 2.0"
+
+    def run(self, prompt, aspect_ratio, quality, duration, api_key="",
+            sheet_image=None, sheet_url="", scene_image_2=None, scene_image_3=None):
+        api_key = _load_api_key(api_key)
+
+        images_list = []
+
+        # Character sheet goes first — either from tensor or URL
+        if sheet_image is not None:
+            print("[Seedance2 ConsistentVideo] Uploading character sheet...")
+            images_list.append(_upload_image(api_key, sheet_image))
+        elif sheet_url and sheet_url.strip():
+            images_list.append(sheet_url.strip())
+        else:
+            raise ValueError(
+                "Connect sheet_image (from Seedance2Character) or paste sheet_url."
+            )
+
+        # Optional extra images
+        for i, img in enumerate([scene_image_2, scene_image_3], 2):
+            if img is not None:
+                print(f"[Seedance2 ConsistentVideo] Uploading scene image {i}...")
+                images_list.append(_upload_image(api_key, img))
+
+        # Ensure @image1 is present so the model anchors on the character sheet
+        if "@image1" not in prompt:
+            prompt = f"@image1 {prompt.strip()}"
+
+        payload = {
+            "prompt": prompt,
+            "images_list": images_list,
+            "aspect_ratio": aspect_ratio,
+            "quality": quality,
+            "duration": duration,
+        }
+
+        print(f"[Seedance2 ConsistentVideo] Submitting with {len(images_list)} image(s)...")
+        rid = _submit(api_key, "seedance-v2.0-i2v", payload)
+        result = _poll(api_key, rid)
+        url = _output_url(result)
+        print(f"[Seedance2 ConsistentVideo] Done → {url}")
+        return (url, _first_frame(url), rid)
+
+
+NODE_CLASS_MAPPINGS = {
+    "Seedance2ApiKey":            Seedance2ApiKey,
+    "Seedance2TextToVideo":       Seedance2TextToVideo,
+    "Seedance2ImageToVideo":      Seedance2ImageToVideo,
+    "Seedance2Extend":            Seedance2Extend,
+    "Seedance2Omni":              Seedance2Omni,
+    "Seedance2Character":         Seedance2Character,
+    "Seedance2ConsistentVideo":   Seedance2ConsistentVideo,
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "Seedance2ApiKey":            "🔑 Seedance 2.0 API Key",
+    "Seedance2TextToVideo":       "🌱 Seedance 2.0 Text-to-Video",
+    "Seedance2ImageToVideo":      "🌱 Seedance 2.0 Image-to-Video",
+    "Seedance2Extend":            "🌱 Seedance 2.0 Extend",
+    "Seedance2Omni":              "🌱 Seedance 2.0 Omni Reference",
+    "Seedance2Character":         "🌱 Seedance 2.0 Consistent Character",
+    "Seedance2ConsistentVideo":   "🌱 Seedance 2.0 Consistent Character Video",
+}
