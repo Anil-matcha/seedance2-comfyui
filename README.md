@@ -29,6 +29,7 @@ The companion pack supports the current Seedance 2.5 workflow surface: 720p and 
 - [awesome-seedance-2.5-api-prompts](https://github.com/Anil-matcha/awesome-seedance-2.5-api-prompts) — Curated Seedance 2.5 API guide, prompts, camera controls, and video generation examples
 - [seedance-2-mcp](https://github.com/Anil-matcha/seedance-2-mcp) — Focused MCP server for Seedance 2 generation from AI assistants
 - [seedance-2.5-mcp](https://github.com/Anil-matcha/seedance-2.5-mcp) — Focused MCP server for Seedance 2.5 Preview generation
+- [awesome-seedance-motion-control-api](https://github.com/Anil-matcha/awesome-seedance-motion-control-api) — Seedance 2 & 2.5 Motion Control API guide — recast a performance video with new performers while preserving motion, camera, and location
 
 ## 🧪 Try in the Muapi Playground (no ComfyUI needed)
 
